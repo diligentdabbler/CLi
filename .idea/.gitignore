@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# PyCharm settings
+.idea/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Local PyCharm files
+/shelf/
+/workspace.xml
+/httpRequests/
+/dataSources/
+/dataSources.local.xml
