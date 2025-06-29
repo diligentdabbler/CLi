@@ -1,0 +1,14 @@
+# macOS system files
+.DS_Store
+
+# PyCharm/JetBrains project settings
+.idea/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Raw Data: exclude non-core project folders
+All_Vanguard_Tickers/
+FIdelity_Port/

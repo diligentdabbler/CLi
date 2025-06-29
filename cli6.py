@@ -1,6 +1,3 @@
-      # CLI TOOLSET #
-
-
 # --- Import Libraries --- #
 # ------------------------ #
 import argparse
@@ -10,9 +7,6 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.dates import DateFormatter
 from matplotlib.patches import FancyBboxPatch
-# from matplotlib.offsetbox import TextArea, AnnotationBbox
-# from datetime import datetime # why is this here?
-# import matplotlib.font_manager as fm #
 import os
 import sys
 
@@ -123,9 +117,9 @@ def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=Non
         # Todays % Error
         percent_error = ((today_log_price - expected_log_price) / expected_log_price) * 100
 
-        # Mean % Error over all available data
+        # Mean absolute percent error over all available data
         percent_errors = ((df['price_y'] - df['priceTL']) / df['priceTL']) * 100
-        mean_percent_error = percent_errors.mean()
+        mape = percent_errors.abs().mean()
 
         # Distance from regression line in std dev.
         std_devs_from_line = (today_log_price - expected_log_price) / df['SD'].iloc[-1]
@@ -133,10 +127,10 @@ def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=Non
         # Compose the summary content
         summary_title = "REGRESSION SUMMARY:"
         summary_lines = [
-            f"Todays log: {today_log_price:.2f}",
-            f"Estimate: {expected_log_price:.2f}",
+            f"Todays log: {today_log_price:.4f}",
+            f"Estimate: {expected_log_price:.4f}",
             f"Todays Error: {percent_error:.2f}%",
-            f"Mean Error: {mean_percent_error:.2f}%",  # <-- MAPE added
+            f"MAPE: {mape:.2f}%",  # <-- MAPE added
             f"STDev: {std_devs_from_line:.2f}σ"
         ]
         full_summary_text = [summary_title] + summary_lines
@@ -178,13 +172,13 @@ def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=Non
                     color = 'red'
 
             elif i == 4:  # Mean % Error
-                if -2.5 <= mean_percent_error <= 2.5:
+                if -2.5 <= mape <= 2.5:
                     color = 'green'
-                elif -5 <= mean_percent_error <= 5:
+                elif -5 <= mape <= 5:
                     color = 'lightgreen'
-                elif -10 <= mean_percent_error <= 10:
+                elif -10 <= mape <= 10:
                     color = 'pink'
-                elif mean_percent_error < -10 or mean_percent_error > 10:
+                elif mape < -10 or mape > 10:
                     color = 'red'
 
             elif i == 5:  # STDev
@@ -802,12 +796,12 @@ if __name__ == '__main__':
         CLI TOOLs
         =========
 
-  --> Change directory:
+From terminal --> Change directory:
 cd ~/path/to/your/folder
 
-  --> Run python script:
+From venv --> Run python script:
 python3 cli3.py SPY GOLD USD-BTC 
---log --normdist --intrv 1d 
+--log --norm --intrv 1d 
 --smooth 252 --pe --div --compare 
 --start 1900-01-01 --end 2100-01-01 --csv 
 
@@ -822,7 +816,7 @@ Ticker (default)        Ticker must come first (SPY GOLD USD-BTC)
 Optional Arguments:
 "blank"                 Returns the default linear chart for X ticker
 --log                   Returns the logarithmic chart in addition to the default linear chart
---normdist              Plots a .png distribution of daily % inc/dec for (perc, div, pe)
+--norm / --normdist     Plots a .png distribution of daily % inc/dec for (perc, div, pe)
 --intrv                 Data interval (e.g., 1d, 1wk, 1mo, etc.)
 --smooth                Rolling regression window (e.g., 252 for 1-year daily)         
 --perc                  Display percent gain/loss over the selected date range (defaults to included)
@@ -844,7 +838,7 @@ COMMANDS:
 ---------------]
 python3 cli3.py
 --log
---normdist
+--norm / --normdist
 --intrv 1d
 --smooth 1008
 --perc
