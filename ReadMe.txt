@@ -6,11 +6,11 @@ The intended use of this script is to act as a quantitative pre/post-requisite f
 In other words, the qualitative fundamentals, financials and future prospects of said asset must be sound in order for this to be used as an "indicator of timing".
 
 Indicators/Assumptions:
-When you run --log on a given ticker(s) the linear and log charts will be outputted in one png file for each respective ticker, accompanied with a summary statistics box and legend.
+When you run --log on a given ticker(s) the linear and log charts will be outputted in one png file for each respective ticker, accompanied by a summary statistics box and legend.
 The legend defines our assumptions, the summary statistics box presents the values derived and their assumed positive/negative indicators with conditional color formatting.
 For example, with the current version (cli6.py) if a given tickers actual price today is <= -2 std devs below the estimate of the regression line,
 and the mean absolute percentage error (MAPE) of that regression line is < 2.5%,
-than the given ticker is identified as undervalued (dark green) on both metrics,
+then both metrics are identified as positive (dark green) and subsequently the ticker is identified as undervalued, --> *(add text that presents on .png as "overvalued" or "undervalued")*
 due to both the current position in # of std devs and the accuracy of the regression being run.
 
 ~None of these assumptions are set in stone, they are to be tested and refined.
@@ -34,6 +34,13 @@ VENV Instructions:
 From venv --> Run python script
 python3 cli6.py SPY GOLD USD-BTC
 [----------------------------------]
+GIT Push/Pull Instructions:
+cd /path/to/your/project (only from terminal)
+git status               (venv start here)
+git add -A
+git commit -m "Your commit message"
+git push origin main
+[----------------------------------]
 
         ========
         COMMANDS
@@ -52,8 +59,8 @@ OPTIONAL Arguments:
 --pe                    Chart P/E ratios over defined date range
 --div                   Chart dividends over defined date range
 --compare               v1. Produces a comparison .png output for the tickers and metrics inputted (--pe, --div, ect.) over defined date range
---comparex              v2. Compares x ticker (--vs ticker) to a group of inputted tickers (using the --vs ticker as the basis to compare the group against)
---vs                    Conditional argument for --comparex ex. (--comparex aapl msft goog --vs nvda)
+--comparex              v2. Compares x ticker --vs a group of tickers (using the --comparex ticker as the basis to compare the --vs group against) *only functional on --pe metric currently*
+--vs                    Conditional argument for --comparex ex. (--comparex nvda --vs amd msft adi --pe)
 --start YYYY-MM-DD      Set the start date for data (default: inception)
 --end YYYY-MM-DD        Set the end date for data (default: today)
 --csv                   Save raw data to .csv file
@@ -116,6 +123,7 @@ python3 cli6.py
 --smooth 25200   ≈ 100 years
 ----------------------------]
 
-v6. CURRENT CAPABILITIES:
-python3 cli6.py --log --normdist --intrv 1d --smooth 252 --pe --div --compare y z --vs x --start 1900-01-01 --end 2100-01-01 --csv
-
+v6. CURRENT CAPABILITY Examples:
+python3 cli6.py --log --normdist --intrv 1d --smooth 252 --start 1900-01-01 --end 2100-01-01 --pe --div --compare --csv
+python3 cli6.py --comparex nvda --vs amd msft adi --pe
+-----------------------------------------------------------------------------------------------------------------------]
