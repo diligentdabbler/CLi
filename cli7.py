@@ -347,8 +347,15 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
                     end_pe = pe_series.iloc[-1]
                     pe_change = round(((end_pe - start_pe) / start_pe) * 100, 2)
 
+# pe edit to add price and eps below
+# FIX why eps is same for everyday?
                     if save_csv or getattr(args, 'csv', False):
-                        hist_pe_df = pd.DataFrame({'Date': pe_series.index, 'PE': pe_series.values})
+                        hist_pe_df = pd.DataFrame({
+                            'Date': pe_series.index,
+                            'Price': hist.loc[pe_series.index, 'Close'].values,
+                            'EPS': [earnings_per_share] * len(pe_series),
+                            'PE': pe_series.values
+                        })
                         hist_pe_df.to_csv(f'{symbol}_pe.csv', index=False)
                         print(f"✔️Saved P/E data to: {symbol}_pe.csv")
 

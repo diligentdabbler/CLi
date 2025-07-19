@@ -38,7 +38,7 @@ GIT Push/Pull Instructions:
 cd /path/to/your/project (only from terminal)
 git status               (venv start here)
 git add -A
-git commit -m "Your commit message"
+git commit -m "commit message"
 git push origin main
 [----------------------------------]
 
