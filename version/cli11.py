@@ -45,6 +45,7 @@ def rolling_log_regression(df, window):
 
     # --------- Plot Chart --------- #
 
+
 def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=None, show_log=False):
     if not isinstance(df.index, pd.RangeIndex):
         df = df.reset_index()
@@ -298,6 +299,8 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
     }
 
     # --------- Normal dist Histogram Function --------- #
+
+
 def create_histograms(symbol, df, start_dt, end_dt, args):
     try:
         print(f"📊 Creating histogram(s) for {symbol}...")
@@ -411,23 +414,23 @@ if __name__ == '__main__':
                             ================
                             CLI TOOLs: GUIDE
                             ================
-                
+
                         File Architecture:
                             cd ~/path/to/folder     Change directory to your folder
                             python3 script.py       Define the python script in your folder
                             ADD                     TICKERS --intrv --smooth --compare --div --pe --start 1900-01-01 --end 2100-01-01
-                
+
                         Usage:
                             cd ~/path/to/folder
                             python3 script.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe --compare --start 1900-01-01 --end 2100-01-01 --csv
-                
+
                         Positional Arguments:
                             Tickers                 Ticker symbols (SPY GOLD USD-BTC)
-                
+
                         Optional Arguments:
-                        
+
                             --help -h               Open this Guide        
-                          
+
                             "blank"                 Returns the linear chart for X ticker
                             --log                   Returns the logarithmic chart in addition to the default linear chart
                             --intrv                 Data interval (e.g., 1d, 1wk, 1mo, etc.)
@@ -439,23 +442,24 @@ if __name__ == '__main__':
                             --compare               v1. Produces a comparison .png output for the tickers and metrics inputted over defined date range
                             --comparex              v2. Compares x ticker (--vs ticker) or group there of
                             --vs                    Conditional argument for --comparex above ex. (--comparex aapl msft nvda --vs spy)   
-                          
-                          
-                                             
+
+
+
                             --start YYYY-MM-DD      Set the start date for data (default: 2000-01-01)
                             --end YYYY-MM-DD        Set the end date for data (default: today)
                             --csv                   Save to a .CSV file
-                
-                
+
+
                             ===================
                             Shell Instructions:
                             ===================
-                
+
                         --> Change directory
-                        cd ~/path/to/folder
-                
+                        cd ~/path/to/your/folder
+
                         --> Run python script
-                        python3 script.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe --compare --start 1900-01-01 --end 2100-01-01 --csv
+                        python3 cli11.py SPY GOLD USD-BTC --log --normdist --intrv 1d --smooth 252 --pe --div --compare --csv --start 1900-01-01 --end 2100-01-01
+
 
 =============
 [COPY/PASTE]:
@@ -479,12 +483,7 @@ if __name__ == '__main__':
 
 --start 1900-01-01 --end 2100-01-01 
 
-python3 log8.py eix swk unh --normdist
-python3 log8.py eix swk unh --normdist --intrv 1d
-python3 log8.py eix swk unh --normdist --intrv 1d --smooth 252
-python3 log8.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe --compare --start 1900-01-01 --end 2100-01-01 --csv
-
-python3 cli.py spy --log --intrv 1d --smooth 252 --normdist --pe --div --start 
+python3 cli11.py SPY GOLD BTC-USD --log --normdist --intrv 1d --smooth 252 --pe --div --compare --csv --start 1900-01-01 --end 2100-01-01
 
 
         """)
@@ -492,7 +491,7 @@ python3 cli.py spy --log --intrv 1d --smooth 252 --normdist --pe --div --start
 
     args = parser.parse_args()
 
-    # Ensure --perc gain is calculated by default unless explicitly turned off
+    # Ensure --perc gain/loss is calculated by default unless explicitly turned off
     if not getattr(args, 'perc', False):
         args.perc = True
 

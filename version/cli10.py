@@ -8,6 +8,7 @@ from datetime import datetime
 import os
 import sys
 
+
 def logarithmic_regression(df):
     df = df.copy()
     df['price_y'] = np.log(df['Close'])
@@ -44,55 +45,41 @@ def rolling_log_regression(df, window):
 
     # --------- Plot Chart --------- #
 
-def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=None):
-        if not isinstance(df.index, pd.RangeIndex):
-            df = df.reset_index()
-        if 'Datetime' in df.columns:
-            df.rename(columns={'Datetime': 'Date'}, inplace=True)
-        elif 'index' in df.columns:
-            df.rename(columns={'index': 'Date'}, inplace=True)
+def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=None, show_log=False):
+    if not isinstance(df.index, pd.RangeIndex):
+        df = df.reset_index()
+    if 'Datetime' in df.columns:
+        df.rename(columns={'Datetime': 'Date'}, inplace=True)
+    elif 'index' in df.columns:
+        df.rename(columns={'index': 'Date'}, inplace=True)
 
+    if show_log:
         fig, (ax1, ax2) = plt.subplots(dpi=600, nrows=2, sharex=True)
-        ax1.grid(True, color='silver', linewidth=0.5)
+    else:
+        fig, ax1 = plt.subplots(dpi=600)
+        ax2 = None
+
+    ax1.grid(True, color='silver', linewidth=0.5)
+    ax1.set_ylabel('Price')
+    ax1.plot(df['Date'], df['Close'], color='black', linewidth=0.25)
+    ax1.set_title('Linear Chart', loc='center', fontsize=9)
+
+    title = f'{symbol} Log Regression ({percent_gain:+.2f}%)' if percent_gain is not None else f'{symbol} Log Regression'
+    plt.suptitle(title, fontsize=11, weight='bold')
+
+    if percent_gain is not None and date_range:
+        fig.text(0.99, 0.94, f'*{date_range}*', fontsize=6, style='italic', ha='right')
+
+    if avg_div_yield is not None:
+        fig.text(0.99, 0.91, f'Avg Annual Yield: {avg_div_yield:.2f}%', fontsize=6, style='italic', ha='right')
+
+    if show_log and ax2:
         ax2.grid(True, color='silver', linewidth=0.5)
-        ax1.set_ylabel('Price')
         ax2.set_xlabel('Date')
-        ax2.set_ylabel('Log Price and Trend')
-
-        title = f'{symbol} Log Regression ({percent_gain:+.2f}%)' if percent_gain is not None else f'{symbol} Log Regression'
-        plt.suptitle(title, fontsize=10)
-
-        if percent_gain is not None and date_range:
-            fig.text(0.99, 0.94, f'*{date_range}*', fontsize=6, style='italic', ha='right')
-
-        if avg_div_yield is not None:
-            fig.text(0.99, 0.91, f'Avg Annual Yield: {avg_div_yield:.2f}%', fontsize=6, style='italic', ha='right')
-
-        # ✅ Add regression summary box with robust handling
-        try:
-            today_log_price = df['price_y'].dropna().iloc[-1]
-            expected_log_price = df['priceTL'].dropna().iloc[-1]
-            sd = df['SD'].dropna().iloc[-1]
-
-            percent_error = ((today_log_price - expected_log_price) / expected_log_price) * 100
-            std_devs_from_line = (today_log_price - expected_log_price) / sd if sd else float('nan')
-
-            summary_text = (
-                f"Today's log price: {today_log_price:.4f}\n"
-                f"Expected from trend: {expected_log_price:.4f}\n"
-                f"% Error: {percent_error:.2f}%\n"
-                f"SD from trend: {std_devs_from_line:.2f}σ"
-            )
-
-            fig.text(0.01, 0.93, summary_text,
-                     ha='left', va='top', fontsize=6,
-                     bbox=dict(facecolor='white', alpha=0.8, edgecolor='black', boxstyle='round,pad=0.4'))
-        except Exception as e:
-            print(f"⚠️ Could not generate log regression summary box for {symbol}: {e}")
-
+        ax2.set_ylabel('Price')
+        ax2.set_title('Log Chart', loc='center', fontsize=9)
         ax2.xaxis.set_major_formatter(DateFormatter("%m/%y"))
 
-        ax1.plot(df['Date'], df['Close'], color='blue', linewidth=0.5)
         ax2.plot(df['Date'], df['price_y'], color='black', linewidth=0.5)
         ax2.plot(df['Date'], df['TLp2SD'], color='hotpink', linewidth=0.5)
         ax2.plot(df['Date'], df['TLpSD'], color='orange', linewidth=0.5)
@@ -112,10 +99,20 @@ def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=Non
         ax2.text(last_date, df['TL_SD'].iloc[-1], '-1', va='center', ha='left', fontsize=6)
         ax2.text(last_date, df['TL_2SD'].iloc[-1], '-2', va='center', ha='left', fontsize=6)
 
-        return fig
+        try:
+            today_log_price = df['price_y'].iloc[-1]
+            expected_log_price = df['priceTL'].iloc[-1]
+            percent_error = ((today_log_price - expected_log_price) / expected_log_price) * 100
+            std_devs_from_line = (today_log_price - expected_log_price) / df['SD'].iloc[-1]
 
 
-    # --------- Run Log Regression ---------
+        except Exception as e:
+            print(f"Could not generate log regression summary box: {e}")
+
+    return fig
+
+
+# --------- Run Log Regression ---------
 
 def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=False, args=None):
     print(f"Fetching data for {symbol}...")
@@ -125,7 +122,7 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
         print(f"No valid data returned for '{symbol}'.")
         return
 
-# Set default dates based on actual data if not provided
+    # Set default dates based on actual data if not provided
     if start is None:
         start = df['Date'].iloc[0].strftime('%Y-%m-%d')
     if end is None:
@@ -146,13 +143,9 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
             print(f"❌Error calculating percent gain for {symbol}: {e}")
 
     df = rolling_log_regression(df, rolling) if rolling and rolling < len(df) else logarithmic_regression(df)
-    fig = plot_chart(
-        df,
-        symbol,
-        percent_gain=percent_gain,
-        date_range=date_range,
-        avg_div_yield=avg_div_yield if args.div else None  # <--- ✅ now this is safe
-    )
+    fig = plot_chart(df, symbol, percent_gain=percent_gain, date_range=date_range,
+                     avg_div_yield=avg_div_yield if args.div else None,
+                     show_log=getattr(args, 'log', False))
 
     # Save PNG + CSV for the regression chart
     filename = f'{symbol}_log_regression.png'
@@ -222,7 +215,6 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
                 print(f"Not enough info to calculate PE for {symbol}.")
         except Exception as e:
             print(f"❌ Could not calculate PE for {symbol}: {e}")
-
 
     # ----- DIVIDENDS BLOCK ----- #
     avg_div_yield = None
@@ -305,8 +297,7 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
         'Average PE Ratio': avg_pe
     }
 
-    # --------- Normal Dist Chart Function --------- #
-
+    # --------- Normal dist Histogram Function --------- #
 def create_histograms(symbol, df, start_dt, end_dt, args):
     try:
         print(f"📊 Creating histogram(s) for {symbol}...")
@@ -330,6 +321,10 @@ def create_histograms(symbol, df, start_dt, end_dt, args):
         if getattr(args, 'div', False):
             dividends = yf.Ticker(symbol).dividends
             if not dividends.empty:
+                if dividends.index.tz is None:
+                    dividends.index = dividends.index.tz_localize('UTC')
+                start_dt = start_dt.tz_localize('UTC') if start_dt.tzinfo is None else start_dt
+                end_dt = end_dt.tz_localize('UTC') if end_dt.tzinfo is None else end_dt
                 dividends = dividends[(dividends.index >= start_dt) & (dividends.index <= end_dt)]
                 if not dividends.empty:
                     metrics.append(dividends)
@@ -351,7 +346,7 @@ def create_histograms(symbol, df, start_dt, end_dt, args):
                     y_labels.append('P/E')
                     today_values.append(pe_series.iloc[-1])
 
-        # Plot each histogram
+        # Plot each histogram (✅ now inside the try block)
         for i in range(len(metrics)):
             series = metrics[i]
             title = titles[i]
@@ -368,7 +363,11 @@ def create_histograms(symbol, df, start_dt, end_dt, args):
             plt.ylabel('Frequency')
             plt.tight_layout()
 
-            filename = f"{symbol}_{title.replace(' ', '_').lower()}_normdist.png"
+            # Safe filename generation
+            import re
+            safe_title = re.sub(r'[^A-Za-z0-9_]+', '_', title.lower())
+            filename = f"{symbol}_{safe_title}_normdist.png"
+
             plt.savefig(filename)
             plt.close()
             print(f"✔️Saved histogram to: {os.path.abspath(filename)}")
@@ -391,7 +390,10 @@ if __name__ == '__main__':
                         help='Data interval (e.g., 1d, 1wk, 1mo)')
     parser.add_argument('--smooth', type=int, default=None, help='Rolling window for regression (e.g., 252)')
 
-    parser.add_argument('--perc', '--PERC', dest='perc', action='store_true', help='Display percent gain over the date range')
+    parser.add_argument('--log', action='store_true', help='Include log regression chart view')
+
+    parser.add_argument('--perc', '--PERC', dest='perc', action='store_true',
+                        help='Display percent gain over the date range')
     parser.add_argument('--div', action='store_true', help='Chart dividends and output raw values')
     parser.add_argument('--pe', action='store_true', help='Chart P/E ratio and output raw values')
     parser.add_argument('--normdist', action='store_true', help='Create histogram of metric distributions')
@@ -406,70 +408,83 @@ if __name__ == '__main__':
     pre_args, _ = parser.parse_known_args()
     if pre_args.help:
         print("""
-        ================
-        CLI TOOLs: GUIDE
-        ================
+                            ================
+                            CLI TOOLs: GUIDE
+                            ================
+                
+                        File Architecture:
+                            cd ~/path/to/folder     Change directory to your folder
+                            python3 script.py       Define the python script in your folder
+                            ADD                     TICKERS --intrv --smooth --compare --div --pe --start 1900-01-01 --end 2100-01-01
+                
+                        Usage:
+                            cd ~/path/to/folder
+                            python3 script.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe --compare --start 1900-01-01 --end 2100-01-01 --csv
+                
+                        Positional Arguments:
+                            Tickers                 Ticker symbols (SPY GOLD USD-BTC)
+                
+                        Optional Arguments:
+                        
+                            --help -h               Open this Guide        
+                          
+                            "blank"                 Returns the linear chart for X ticker
+                            --log                   Returns the logarithmic chart in addition to the default linear chart
+                            --intrv                 Data interval (e.g., 1d, 1wk, 1mo, etc.)
+                            --smooth                Rolling regression window (e.g., 252 for 1-year daily)         
+                            --normdist              Plots a .png distribution of daily % inc/dec for (perc, div, pe)
+                            --perc                  Display percent gain/loss over the selected date range (defaults to included)
+                            --pe                    Chart P/E ratio and output raw values
+                            --div                   Chart dividends and output raw values
+                            --compare               v1. Produces a comparison .png output for the tickers and metrics inputted over defined date range
+                            --comparex              v2. Compares x ticker (--vs ticker) or group there of
+                            --vs                    Conditional argument for --comparex above ex. (--comparex aapl msft nvda --vs spy)   
+                          
+                          
+                                             
+                            --start YYYY-MM-DD      Set the start date for data (default: 2000-01-01)
+                            --end YYYY-MM-DD        Set the end date for data (default: today)
+                            --csv                   Save to a .CSV file
+                
+                
+                            ===================
+                            Shell Instructions:
+                            ===================
+                
+                        --> Change directory
+                        cd ~/path/to/folder
+                
+                        --> Run python script
+                        python3 script.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe --compare --start 1900-01-01 --end 2100-01-01 --csv
 
-        File Architecture:
-          cd ~/path/to/folder     Change directory to your folder
-          python3 script.py       Define the python script in your folder
-          ADD                     TICKERS --intrv --smooth --compare --div --pe --start 1900-01-01 --end 2100-01-01
+=============
+[COPY/PASTE]:
+=============
 
-        Usage:
-          cd ~/path/to/folder
-          python3 script.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe --compare --start 1900-01-01 --end 2100-01-01 --csv
+--smooth 252
+--smooth 504
+--smooth 756 
+--smooth 1008
+--smooth 1260
+--smooth 2520 
+--smooth 5040 
+--smooth 7560
+--smooth 10080 
+--smooth 12600 
+--smooth 15120 
+--smooth 17640 
+--smooth 20160 
+--smooth 22680 
+--smooth 25200 
 
-        Positional Arguments:
-          Tickers                 Ticker symbols (SPY GOLD USD-BTC)
-          
-        Optional Arguments:
-          --help -h               Open this Guide        
-          --start YYYY-MM-DD      Set the start date for data (default: 2000-01-01)
-          --end YYYY-MM-DD        Set the end date for data (default: today)
-          --intrv                 Data interval (e.g., 1d, 1wk, 1mo, etc.)
-          --smooth                Rolling regression window (e.g., 252 for 1-year daily)         
-          --perc                  Display percent gain/loss over the selected date range (defaults to included)
-          --div                   Chart dividends and output raw values
-          --pe                    Chart P/E ratio and output raw values
-          --compare               v1. Produces a comparison .png output for the tickers and metrics inputted over defined date range
-          --comparex              v2. Compares x ticker (--vs ticker) or group there of
-          --vs                    Conditional argument for --comparex above ex. (--comparex aapl msft nvda --vs spy)                      
-          --csv                   Save to a .CSV file
-          
-        ===================
-        Shell Instructions:
-        ===================
-        
-    --> Change directory
-        cd ~/path/to/folder
-        
-    --> Run python script
-        python3 script.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe --compare --start 1900-01-01 --end 2100-01-01 --csv
-        
-        =============
-        [COPY/PASTE]:
-        =============
-        
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 252 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 504 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 756 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 1008 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 1260 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 2520 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 5040 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 7560 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 10080 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 12600 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 15120 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 17640 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 20160 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 22680 --compare --div --pe --start 1900-01-01 --end 2100-01-01
-python3 log8.py spy gold btc-usd --intrv 1d --smooth 25200 --compare --div --pe --start 1900-01-01 --end 2100-01-01
+--start 1900-01-01 --end 2100-01-01 
 
-python3 log8.py eix swk unh --normdist
-python3 log8.py eix swk unh --normdist --intrv 1d
-python3 log8.py eix swk unh --normdist --intrv 1d --smooth 252
-python3 log8.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe --compare --start 1900-01-01 --end 2100-01-01 --csv
+python3 cli18.py eix swk unh --normdist
+python3 cli18.py eix swk unh --normdist --intrv 1d
+python3 cli18.py eix swk unh --normdist --intrv 1d --smooth 252
+python3 cli18.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe --compare --start 1900-01-01 --end 2100-01-01 --csv
+
+python3 cli10.py spy --log --intrv 1d --smooth 252 --normdist --pe --div --start 
 
 
         """)
@@ -569,7 +584,8 @@ python3 log8.py SPY GOLD USD-BTC --intrv 1d --smooth 252 --normdist --div --pe -
                     f"Max: {df_compare[metric].max():.2f}\n"
                     f"Min: {df_compare[metric].min():.2f}"
                 )
-                plt.gcf().text(0.98, 0.8, stats_text, fontsize=7, va='top', ha='right', bbox=dict(boxstyle="round", facecolor='white', edgecolor='gray'))
+                plt.gcf().text(0.98, 0.8, stats_text, fontsize=7, va='top', ha='right',
+                               bbox=dict(boxstyle="round", facecolor='white', edgecolor='gray'))
 
                 plt.tight_layout()
                 file_safe_metric = metric.replace(" ", "_").lower()

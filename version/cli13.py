@@ -1,3 +1,7 @@
+# CLI TOOLSET #
+# ----------- #
+
+
 # --- Import Libraries --- #
 # ------------------------ #
 import argparse
@@ -7,6 +11,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.dates import DateFormatter
 from matplotlib.patches import FancyBboxPatch
+from matplotlib.offsetbox import TextArea, AnnotationBbox
+# from datetime import datetime # why is this here?
+# import matplotlib.font_manager as fm #
 import os
 import sys
 
@@ -30,7 +37,7 @@ def logarithmic_regression(df):
 
 # --------- --Smooth Function ---------- #
 # -------------------------------------- #
-def smooth_log_regression(df, window):
+def rolling_log_regression(df, window):
     df = df.copy()
     df['price_y'] = np.log(df['Close'])
     df['x'] = np.arange(len(df))
@@ -108,29 +115,20 @@ def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=Non
 
 
 # ----------- Regression Summary Stats ----------- #
-# ------------------------------------------------ #
+# ---------------------------------------------- #
     try:
         # Calculate summary statistics
         today_log_price = df['price_y'].iloc[-1]
         expected_log_price = df['priceTL'].iloc[-1]
-
-        # Todays % Error
         percent_error = ((today_log_price - expected_log_price) / expected_log_price) * 100
-
-        # Mean absolute percent error over all available data
-        percent_errors = ((df['price_y'] - df['priceTL']) / df['priceTL']) * 100
-        mape = percent_errors.abs().mean()
-
-        # Distance from regression line in std dev.
         std_devs_from_line = (today_log_price - expected_log_price) / df['SD'].iloc[-1]
 
         # Compose the summary content
         summary_title = "REGRESSION SUMMARY:"
         summary_lines = [
-            f"Todays log: {today_log_price:.4f}",
-            f"Estimate: {expected_log_price:.4f}",
-            f"Todays Error: {percent_error:.2f}%",
-            f"MAPE: {mape:.2f}%",  # <-- MAPE added
+            f"Todays log: {today_log_price:.2f}",
+            f"Estimate: {expected_log_price:.2f}",
+            f"% Error: {percent_error:.2f}%",
             f"STDev: {std_devs_from_line:.2f}σ"
         ]
         full_summary_text = [summary_title] + summary_lines
@@ -161,27 +159,16 @@ def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=Non
         for i, line in enumerate(full_summary_text):
             color = 'white'
 
-            if i == 3:  # Today % Error
-                if -2.5 <= percent_error <= 2.5:
-                    color = 'green'
-                elif -5 <= percent_error <= 5:
-                    color = 'lightgreen'
-                elif -10 <= percent_error <= 10:
-                    color = 'pink'
-                elif percent_error < -10 or percent_error > 10:
+            if i == 3:  # % Error
+                if percent_error <= -10 or percent_error >= 10:
                     color = 'red'
-
-            elif i == 4:  # Mean % Error
-                if -2.5 <= mape <= 2.5:
-                    color = 'green'
-                elif -5 <= mape <= 5:
-                    color = 'lightgreen'
-                elif -10 <= mape <= 10:
+                elif percent_error <= -5 or percent_error >= 5:
                     color = 'pink'
-                elif mape < -10 or mape > 10:
-                    color = 'red'
-
-            elif i == 5:  # STDev
+                elif percent_error >= -5 or percent_error <= -2.5 or percent_error >= 2.5 or percent_error <= 5:
+                    color = 'lightgreen'
+                elif percent_error >= -2.5 or percent_error <= 2.5:
+                    color = 'green'
+            elif i == 4:  # STDev
                 if 0 >= std_devs_from_line >= -1:
                     color = 'lightgreen'
                 elif std_devs_from_line <= -1:
@@ -190,7 +177,7 @@ def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=Non
                     color = 'pink'
                 elif std_devs_from_line >= 1:
                     color = 'red'
-
+# Fix condition above ^
             ax.text(
                 box_x - 0.035,
                 box_y + height / 1.75 - (i + 1) * spacing,
@@ -305,7 +292,7 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
         except Exception as e:
             print(f"❌Error calculating percent gain for {symbol}: {e}")
 
-    df = smooth_log_regression(df, rolling) if rolling and rolling < len(df) else logarithmic_regression(df)
+    df = rolling_log_regression(df, rolling) if rolling and rolling < len(df) else logarithmic_regression(df)
     fig = plot_chart(df, symbol, percent_gain=percent_gain, date_range=date_range,
                      avg_div_yield=avg_div_yield if args.div else None,
                      show_log=getattr(args, 'log', False))
@@ -321,8 +308,7 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
         df.to_csv(csv_name, index=False)
         print("✔️Saved data to:", os.path.abspath(csv_name))
 
-    # ----------------------------------------- #
-    # --------- New Logic Starts Here --------- #
+    # --------- New Logic Starts Here ---------
     std_dev = round(df['y_TL'].std(), 4) if 'y_TL' in df else None
     avg_pe = None
     avg_div = None
@@ -330,46 +316,16 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
     ticker_obj = yf.Ticker(symbol)
     hist = ticker_obj.history(start=start, end=end)
 
-
-    # ----- PE RATIO BLOCK WITH QUARTERLY EPS (from income_stmt) ----- #
+    # ----- PE RATIO BLOCK ----- #
     avg_pe = None
 
     if getattr(args, 'pe', False):
         try:
             hist = ticker_obj.history(start=start, end=end, interval=interval)
-            fin = ticker_obj.quarterly_financials  # Use this instead of deprecated .earnings
+            earnings_per_share = ticker_obj.info.get('trailingEps')
 
-            # Debugging #
-            print("\n🔍 Available rows in quarterly_financials index:")
-            print(fin.index)
-
-            print("\n🧾 Available columns (report dates):")
-            print(fin.columns)
-            # --------- #
-
-            if 'Net Income' in fin.index and 'Basic Average Shares' in fin.index:
-                # Step 1: Compute EPS = Net Income / Shares Outstanding
-                eps_series = fin.loc['Net Income'] / fin.loc['Basic Average Shares']
-                eps_series.index = pd.to_datetime(eps_series.index)
-
-                # Step 2: Make both indexes timezone-compatible
-                if eps_series.index.tz is None:
-                    eps_series.index = eps_series.index.tz_localize('UTC')
-                if hist.index.tz is None:
-                    hist.index = hist.index.tz_localize('UTC')
-
-                eps_series.index = eps_series.index.tz_convert('America/New_York').tz_localize(None)
-                hist.index = hist.index.tz_convert('America/New_York').tz_localize(None)
-
-                # Step 3: Forward-fill EPS over price data
-                hist = hist.copy()
-                hist['EPS'] = eps_series.reindex(hist.index, method='ffill')
-
-                # Step 4: Drop rows where EPS is still missing
-                hist.dropna(subset=['EPS'], inplace=True)
-
-                # Step 5: Calculate PE
-                hist['PE'] = hist['Close'] / hist['EPS']
+            if 'Close' in hist.columns and earnings_per_share and earnings_per_share > 0:
+                hist['PE'] = hist['Close'] / earnings_per_share
                 pe_series = hist['PE'].dropna()
 
                 if not pe_series.empty:
@@ -379,21 +335,14 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
                     pe_change = round(((end_pe - start_pe) / start_pe) * 100, 2)
 
                     if save_csv or getattr(args, 'csv', False):
-                        hist_pe_df = pd.DataFrame({
-                            'Date': hist.index,
-                            'Price': hist['Close'],
-                            'EPS': hist['EPS'],
-                            'PE': hist['PE']
-                        })
-                        hist_pe_df = hist_pe_df[['Date', 'Price', 'EPS', 'PE']]
+                        hist_pe_df = pd.DataFrame({'Date': pe_series.index, 'PE': pe_series.values})
                         hist_pe_df.to_csv(f'{symbol}_pe.csv', index=False)
                         print(f"✔️Saved P/E data to: {symbol}_pe.csv")
 
-                    # Plot
                     plt.figure(dpi=600)
                     plt.plot(pe_series.index, pe_series, label='P/E Ratio', linewidth=0.5)
                     plt.axhline(avg_pe, linestyle='--', color='red', label=f'Avg PE: {avg_pe}')
-                    plt.title(f'{symbol} P/E Ratio Over Time (Quarterly EPS)', fontsize=9)
+                    plt.title(f'{symbol} P/E Ratio Over Time', fontsize=9)
                     plt.xlabel('Date')
                     plt.ylabel('P/E')
                     plt.grid(True, linestyle='--', alpha=0.5)
@@ -412,13 +361,10 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
                     plt.tight_layout()
                     plt.savefig(f'{symbol}_pe_chart.png')
                     plt.close()
-                else:
-                    print(f"Not enough PE data after EPS alignment for {symbol}.")
             else:
-                print(f"Missing Net Income or Shares Outstanding data to calculate EPS for {symbol}.")
+                print(f"Not enough info to calculate PE for {symbol}.")
         except Exception as e:
             print(f"❌ Could not calculate PE for {symbol}: {e}")
-
 
     # ----- DIVIDENDS BLOCK ----- #
     avg_div_yield = None
@@ -446,7 +392,6 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
 
                 div_df = pd.DataFrame({
                     'Date': dividends.index,
-                    'Share Price': matched_prices.values,
                     'Dividend': dividends.values,
                     'Yield (%)': dividend_yield_series.values
                 })
@@ -583,224 +528,6 @@ def create_histograms(symbol, df, start_dt, end_dt, args):
         print(f"❌ Error creating histograms for {symbol}: {e}")
 
 
-# ------COMPAREX NEW LOGIC------- #
-# ------------------------------- #
-
-# ------ --comparex with --pe ------- #
-# ------------------------------------ #
-def comparex_pe_summary(base_ticker, vs_tickers, args):
-    tickers = [base_ticker] + vs_tickers
-    pe_data = {}
-    eps_data = {}
-
-    for t in tickers:
-        try:
-            obj = yf.Ticker(t)
-            eps = obj.info.get('trailingEps', None)
-            price = obj.history(period='1d')['Close'].iloc[-1]
-            if eps and eps > 0:
-                pe = price / eps
-                pe_data[t] = pe
-                eps_data[t] = eps
-        except Exception:
-            continue
-
-    if base_ticker not in pe_data or len(pe_data) <= 1:
-        print(f"❌ Not enough valid P/E data to compare {base_ticker} vs group.")
-        return
-
-    base_pe = pe_data[base_ticker]
-    group_pes = [pe for t, pe in pe_data.items() if t != base_ticker]
-    group_mean = np.mean(group_pes)
-    group_std = np.std(group_pes)
-    z_score = (base_pe - group_mean) / group_std if group_std > 0 else 0
-    percentile = sum(1 for x in group_pes if x < base_pe) / len(group_pes) * 100
-    percent_diff = ((base_pe - group_mean) / group_mean) * 100
-
-    # Bar Chart
-    plt.figure(figsize=(10, 6), dpi=600)
-    plt.bar(pe_data.keys(), pe_data.values(), color='skyblue', edgecolor='black')
-    plt.axhline(group_mean, linestyle='--', color='gray', label=f'Group Mean: {group_mean:.2f}')
-    plt.axhline(base_pe, linestyle='--', color='red', label=f'{base_ticker} P/E: {base_pe:.2f}')
-    plt.xticks(rotation=45, ha='right')
-    plt.ylabel('P/E Ratio')
-    plt.title(f"{base_ticker} vs Group P/E Ratio", fontsize=10)
-    plt.grid(True, axis='y', linestyle='--', alpha=0.5)
-    plt.legend(fontsize=6)
-
-    # Summary Box
-    summary_title = "P/E COMPARISON SUMMARY"
-    lines = [
-        f"{base_ticker} P/E: {base_pe:.2f}",
-        f"Group Mean: {group_mean:.2f}",
-        f"Group StdDev: {group_std:.2f}",
-        f"Z-Score: {z_score:.2f}",
-        f"Percentile: {percentile:.1f}%",
-        f"% Diff from Mean: {percent_diff:+.2f}%"
-    ]
-    full_text = [summary_title] + lines
-
-    box_x, box_y = 1.03, 0.5
-    width, height = 0.14, 0.35
-    spacing = height / (len(full_text) + 1)
-    fontsize = 6
-
-    ax = plt.gca()
-    bbox = FancyBboxPatch(
-        (box_x, box_y - height / 2), width, height,
-        transform=ax.transAxes,
-        boxstyle="round,pad=0.05",
-        linewidth=0.5,
-        edgecolor='black',
-        facecolor='black',
-        alpha=0.85,
-        zorder=10,
-        clip_on=False
-    )
-    ax.add_patch(bbox)
-
-    for i, line in enumerate(full_text):
-        ax.text(
-            box_x - 0.035,
-            box_y + height / 2 - (i + 1) * spacing,
-            line,
-            transform=ax.transAxes,
-            fontsize=fontsize,
-            fontfamily='monospace',
-            color='white',
-            ha='left',
-            va='center',
-            zorder=11
-        )
-
-    plt.subplots_adjust(right=0.89)
-    filename = f'comparex_{base_ticker.lower()}_pe_chart.png'
-    plt.savefig(filename, bbox_inches='tight')
-    plt.close()
-    print(f"✔️Saved comparex P/E chart to: {os.path.abspath(filename)}")
-
-    # Optional CSV
-    if getattr(args, 'csv', False):
-        pd.DataFrame({
-            'Ticker': list(pe_data.keys()),
-            'PE Ratio': list(pe_data.values())
-        }).to_csv(f'comparex_{base_ticker.lower()}_pe.csv', index=False)
-        print(f"✔️Saved comparex P/E CSV to: {os.path.abspath(f'comparex_{base_ticker.lower()}_pe.csv')}")
-
-
-# ------ --comparex with --div ------- #
-# ------------------------------------ #
-
-def comparex_div_summary(base_ticker, vs_tickers, args):
-    tickers = [base_ticker] + vs_tickers
-    div_yields = {}
-
-    print(f"🟡 Running comparex_div_summary for {base_ticker} vs {vs_tickers}")
-
-    for t in tickers:
-        try:
-            ticker_obj = yf.Ticker(t)
-            dividends = ticker_obj.dividends
-            hist_prices = ticker_obj.history(start=args.start, end=args.end)['Close']
-
-            if not dividends.empty and not hist_prices.empty:
-                if dividends.index.tz is None:
-                    dividends.index = dividends.index.tz_localize('UTC')
-                start_ts = pd.to_datetime(args.start).tz_localize(dividends.index.tz)
-                dividends = dividends[dividends.index >= start_ts]
-
-                price_on_div_dates = hist_prices[hist_prices.index.isin(dividends.index)]
-                matched_prices = price_on_div_dates.reindex(dividends.index, method='nearest')
-
-                div_yield_series = (dividends / matched_prices) * 100
-                avg_yield = round(div_yield_series.mean(), 2)
-                div_yields[t] = avg_yield
-        except Exception:
-            continue
-
-    if base_ticker not in div_yields or len(div_yields) <= 1:
-        print(f"❌ Not enough dividend yield data to compare {base_ticker} vs group.")
-        return
-
-    base_yield = div_yields[base_ticker]
-    group_yields = [y for t, y in div_yields.items() if t != base_ticker]
-    group_mean = np.mean(group_yields)
-    group_std = np.std(group_yields)
-    z_score = (base_yield - group_mean) / group_std if group_std > 0 else 0
-    percentile = sum(1 for x in group_yields if x < base_yield) / len(group_yields) * 100
-    percent_diff = ((base_yield - group_mean) / group_mean) * 100
-
-    # Plot
-    plt.figure(figsize=(10, 6), dpi=600)
-    plt.bar(div_yields.keys(), div_yields.values(), color='skyblue', edgecolor='black')
-    plt.axhline(group_mean, linestyle='--', color='gray', label=f'Group Mean: {group_mean:.2f}%')
-    plt.axhline(base_yield, linestyle='--', color='red', label=f'{base_ticker} Yield: {base_yield:.2f}%')
-    plt.xticks(rotation=45, ha='right')
-    plt.ylabel('Avg Dividend Yield (%)')
-    plt.title(f"{base_ticker} vs Group Dividend Yields", fontsize=10)
-    plt.grid(True, axis='y', linestyle='--', alpha=0.5)
-    plt.legend(fontsize=6)
-
-    # Summary Box
-    summary_title = "DIVIDEND COMPARISON SUMMARY"
-    lines = [
-        f"{base_ticker} Yield: {base_yield:.2f}%",
-        f"Group Mean: {group_mean:.2f}%",
-        f"Group StdDev: {group_std:.2f}",
-        f"Z-Score: {z_score:.2f}",
-        f"Percentile: {percentile:.1f}%",
-        f"% Diff from Mean: {percent_diff:+.2f}%"
-    ]
-    full_text = [summary_title] + lines
-
-    box_x, box_y = 1.03, 0.5
-    width, height = 0.14, 0.35
-    spacing = height / (len(full_text) + 1)
-    fontsize = 6
-
-    ax = plt.gca()
-    bbox = FancyBboxPatch(
-        (box_x, box_y - height / 2), width, height,
-        transform=ax.transAxes,
-        boxstyle="round,pad=0.05",
-        linewidth=0.5,
-        edgecolor='black',
-        facecolor='black',
-        alpha=0.85,
-        zorder=10,
-        clip_on=False
-    )
-    ax.add_patch(bbox)
-
-    for i, line in enumerate(full_text):
-        ax.text(
-            box_x - 0.035,
-            box_y + height / 2 - (i + 1) * spacing,
-            line,
-            transform=ax.transAxes,
-            fontsize=fontsize,
-            fontfamily='monospace',
-            color='white',
-            ha='left',
-            va='center',
-            zorder=11
-        )
-
-    plt.subplots_adjust(right=0.89)
-    filename = f'comparex_{base_ticker.lower()}_div_chart.png'
-    plt.savefig(filename, bbox_inches='tight')
-    plt.close()
-    print(f"✔️Saved comparex dividend chart to: {os.path.abspath(filename)}")
-
-    # Optional CSV
-    if getattr(args, 'csv', False):
-        pd.DataFrame({
-            'Ticker': list(div_yields.keys()),
-            'Avg Dividend Yield (%)': list(div_yields.values())
-        }).to_csv(f'comparex_{base_ticker.lower()}_div.csv', index=False)
-        print(f"✔️Saved comparex dividend CSV to: {os.path.abspath(f'comparex_{base_ticker.lower()}_div.csv')}")
-
-
 # ------------ Argparser ------------ #
 # ----------------------------------- #
 if __name__ == '__main__':
@@ -834,114 +561,68 @@ if __name__ == '__main__':
     pre_args, _ = parser.parse_known_args()
     if pre_args.help:
         print("""
-Description:
-This is a command-line tool that facilitates the analysis of financial market data available via the yfinance python library.
-It requires yfinance, pandas, numpy, matplotlib for data manipulation/visualization and argparse to create a "syntax" for the commandline arguments.
-The intended use of this script is to act as a quantitative pre/post-requisite for making investment decisions.
-In other words, the qualitative fundamentals, financials and future prospects of said asset must be sound in order for this to be used as an "indicator of timing".
-
-Indicators/Assumptions:
-When you run --log on a given ticker(s) the linear and log charts will be outputted in one png file for each respective ticker, accompanied by a summary statistics box and legend.
-The legend defines our assumptions, the summary statistics box presents the values derived and their assumed positive/negative indicators with conditional color formatting.
-For example, with the current version (cli6.py) if a given tickers actual price today is <= -2 std devs below the estimate of the regression line,
-and the mean absolute percentage error (MAPE) of that regression line is < 2.5%,
-then both metrics are identified as positive (dark green) and subsequently the ticker is identified as undervalued, --> *(add text that presents on .png as "overvalued" or "undervalued")*
-due to both the current position in # of std devs and the accuracy of the regression being run.
-
-~None of these assumptions are set in stone, they are to be tested and refined.
-
         =========
-        CLI Setup
+        CLI TOOLs
         =========
 
-REQUIRED libraries:
-pip install yfinance pandas numpy matplotlib argparse
-
-[----------------------------------]
-BASH Instructions:
-From terminal --> Change directory
+  --> Change directory:
 cd ~/path/to/your/folder
 
-From directory --> Run python script
-python3 cli6.py SPY GOLD USD-BTC
-[----------------------------------]
-VENV Instructions:
-From venv --> Run python script
-python3 cli6.py SPY GOLD USD-BTC
-[----------------------------------]
-GIT Push/Pull Instructions:
-cd /path/to/your/project (only from terminal)
-git status               (venv start here)
-git add -A
-git status               (to check that correct changes are staged)
-git commit -m "Your commit message"
-git push origin main
-[----------------------------------]
+  --> Run python script:
+python3 cli12.py SPY GOLD USD-BTC 
+--log --normdist --intrv 1d 
+--smooth 252 --pe --div --compare 
+--start 1900-01-01 --end 2100-01-01 --csv 
 
         ========
         COMMANDS
         ========
 
-POSITIONAL Arguments:
+Positional Arguments:
 Ticker (default)        Ticker must come first (SPY GOLD USD-BTC)
---comparex              Can be used as a positional argument or an optional argument
+--comparex              Can be used as a beginning argument or an optional argument               
 
-OPTIONAL Arguments:
-"blank"                 Returns the default linear chart for x ticker
+Optional Arguments:
+"blank"                 Returns the default linear chart for X ticker
 --log                   Returns the logarithmic chart in addition to the default linear chart
---norm / --normdist     Plots a distribution of daily % gain/loss over a given date range
---intrv                 Data interval (1d, 1wk, 1mo, etc.)
---smooth                Rolling regression window ex. (252 for 1-year daily)
---pe                    Chart P/E ratios over defined date range
---div                   Chart dividends over defined date range
---compare               v1. Produces a comparison .png output for the tickers and metrics inputted (--pe, --div, ect.) over defined date range
---comparex              v2. Compares x ticker --vs a group of tickers (using the --comparex ticker as the basis to compare the --vs group against) *only functional on --pe metric currently*
---vs                    Conditional argument for --comparex ex. (--comparex nvda --vs amd msft adi --pe)
---start YYYY-MM-DD      Set the start date for data (default: inception)
+--normdist              Plots a .png distribution of daily % inc/dec for (perc, div, pe)
+--intrv                 Data interval (e.g., 1d, 1wk, 1mo, etc.)
+--smooth                Rolling regression window (e.g., 252 for 1-year daily)         
+--perc                  Display percent gain/loss over the selected date range (defaults to included)
+--pe                    Chart P/E ratio and output raw values
+--div                   Chart dividends and output raw values
+--compare               v1. Produces a comparison .png output for the tickers and metrics inputted over defined date range
+--comparex              v2. Compares x ticker (--vs ticker) or group thereof
+--vs                    Conditional argument for --comparex above ex. (--comparex aapl msft nvda --vs spy)
+--start YYYY-MM-DD      Set the start date for data (default: 2000-01-01)
 --end YYYY-MM-DD        Set the end date for data (default: today)
---csv                   Save raw data to .csv file
---help -h               Opens this guide
+--csv                   Save to a .CSV file
+--help -h               Opens this Guide        
 
-        ==========
-        COPY/PASTE
-        ==========
+        =============
+        [COPY/PASTE]:
+        =============
 
 COMMANDS:
------------------]
-python3 cli6.py
+---------------]
+python3 cli12.py
 --log
 --normdist
 --intrv 1d
 --smooth 1008
+--perc
 --pe
 --div
 --compare
 --comparex
 --vs
---start 1900-01-01 (Alias for inception)
---end 2100-01-01 (Alias for latest available data)
+--start 1900-01-01
+--end 2100-01-01
 --csv
 ------------------]
-
---INTRV:
-| Interval | Max Period Fetchable | Notes                                              |
-| -------- | -------------------- | -------------------------------------------------- |
-| `1m`     | 7 days               | Only available for recent data, no pre/post-market |
-| `2m`     | 60 days              | Intraday                                           |
-| `5m`     | 60 days              | Intraday                                           |
-| `15m`    | 60 days              | Intraday                                           |
-| `30m`    | 60 days              | Intraday                                           |
-| `60m`    | 730 days (2 years)   | Only returns data for market hours                 |
-| `90m`    | 60 days              | Limited use                                        |
-| `1h`     | Same as `60m`        | Alias for `60m`                                    |
-| `1d`     | Full history         | Highest level of granularity for full history      |
-| `1w`     | Full history         | Medium level of granularity for full history       |
-| `1mo`    | Full history         | Lowest level of granularity for full history       |
----------------------------------------------------------------------------------------|
-
---SMOOTH:
+SMOOTHING: 
 (over N trading days for 1d intervals)
----------------------------]
+-------------------------]
 --smooth 252     ≈ 1 year
 --smooth 504     ≈ 2 years
 --smooth 756     ≈ 3 years
@@ -958,11 +639,9 @@ python3 cli6.py
 --smooth 22680   ≈ 90 years
 --smooth 25200   ≈ 100 years
 ----------------------------]
+CURRENT SCRIPTS:
+python3 cli12.py --log --normdist --intrv 1d --smooth 1008 --perc --pe --div --compare --vs --start 1900-01-01 --end 2100-01-01 --csv
 
-v6. CURRENT CAPABILITY Examples:
-python3 cli6.py --log --normdist --intrv 1d --smooth 252 --start 1900-01-01 --end 2100-01-01 --pe --div --compare --csv
-python3 cli6.py --comparex nvda --vs amd msft adi --pe
------------------------------------------------------------------------------------------------------------------------]
         """)
         sys.exit()
 
@@ -972,14 +651,12 @@ python3 cli6.py --comparex nvda --vs amd msft adi --pe
     if not getattr(args, 'perc', False):
         args.perc = True
 
-    # --- Insert control logic --- #
-    if args.comparex and args.vs and args.pe:
-        base_ticker = args.comparex[0].upper()
-        vs_tickers = [t.upper() for t in args.vs]
-        comparex_pe_summary(base_ticker, vs_tickers, args)
-        # Exit after running this comparison to avoid duplicate processing
-        sys.exit(0)
-
+    # Handle --comparex logic
+    if args.comparex and args.vs:
+        args.tickers = args.comparex + args.vs
+        args.compare = True
+        base_tickers = args.comparex
+        vs_tickers = args.vs
     elif args.comparex and not args.vs:
         print("❌ Error: --comparex must be used with --vs and at least one metric (e.g., --perc, --div, --pe)")
         sys.exit(1)
@@ -988,8 +665,7 @@ python3 cli6.py --comparex nvda --vs amd msft adi --pe
         base_tickers = []
         vs_tickers = []
 
-    # Skip this check if --comparex is used
-    if not args.tickers and not args.comparex:
+    if not args.tickers:
         print("❌Error: You must specify at least one ticker symbol.\nUse --help to view usage instructions.")
         sys.exit(1)
 
@@ -1076,5 +752,4 @@ python3 cli6.py --comparex nvda --vs amd msft adi --pe
 
 # ---------- Compare Section END ---------- #
 # ----------------------------------------- #
-
 
