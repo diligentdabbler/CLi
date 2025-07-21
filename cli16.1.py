@@ -320,6 +320,8 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
         csv_name = f'{symbol}_log_regression.csv'
         df.to_csv(csv_name, index=False)
         print("✔️Saved data to:", os.path.abspath(csv_name))
+# ---------------------------------------------------------------- #
+
 
     # --------- New Logic Starts Here ---------
     std_dev = round(df['y_TL'].std(), 4) if 'y_TL' in df else None
@@ -410,16 +412,104 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
                 end_yield = dividend_yield_series.iloc[-1]
                 div_yield_change = round(((end_yield - start_yield) / start_yield) * 100, 2)
 
+        # DIVIDEND CSV output:
+
                 div_df = pd.DataFrame({
                     'Date': dividends.index,
                     'Share Price': matched_prices.values,
                     'Dividend': dividends.values,
-                    'Yield (%)': dividend_yield_series.values
+                    'Yield (%)': dividend_yield_series.values,
                 })
+
+                # Step 1: Add temporary year column
+                div_df['Year'] = div_df['Date'].dt.year
+
+                # Step 2: Create empty Annual Yield column
+                div_df['Annual Yield'] = np.nan
+                projected_yields = {}
+
+                # Step 3: Project or compute annual yield for each year, assign to last row
+                for year, group in div_df.groupby('Year'):
+                    idx_last = group.index[-1]
+                    n_divs = group['Yield (%)'].count()
+                    y_sum = group['Yield (%)'].sum()
+                    annual_yield = (y_sum / n_divs) * 4 if n_divs < 4 else y_sum
+                    projected_yields[year] = annual_yield
+                    div_df.loc[idx_last, 'Annual Yield'] = annual_yield
+
+                # Step 4: Average annual yield (from valid rows only)
+                avg_annual_yield = div_df['Annual Yield'].mean()
+                div_df['Average Annual Yield'] = np.nan
+                div_df.loc[div_df.index[0], 'Average Annual Yield'] = avg_annual_yield
+
+                # Step 5: Difference from Average (Projects Annual yield for incomplete most recent year)
+                div_df['Diff from Average'] = np.nan
+                for year, group in div_df.groupby('Year'):
+                    idx_last = group.index[-1]
+                    diff = projected_yields[year] - avg_annual_yield
+                    div_df.loc[idx_last, 'Diff from Average'] = diff
+
+                # Step 6: Add % Difference from Average
+                div_df['% Diff from Average'] = np.nan
+
+                for year, group in div_df.groupby(div_df['Date'].dt.year):
+                    idx_last = group.index[-1]
+                    projected_yield = div_df.loc[idx_last, 'Annual Yield']
+
+                    # Avoid division by zero (edge case)
+                    if avg_annual_yield != 0 and not pd.isna(projected_yield):
+                        percent_diff = (projected_yield - avg_annual_yield) / avg_annual_yield
+                        div_df.loc[idx_last, '% Diff from Average'] = percent_diff
+
+                # Step 6.1: Format % Diff from Average as percentage in Excel
+                div_df['% Diff from Average'] = div_df['% Diff from Average'].map(
+                    lambda x: f"{x:.2%}" if pd.notna(x) else ''
+                )
+
+                # Final cleanup
+                div_df.drop(columns='Year', inplace=True)
+
+        # Merge dividend csv analysis with log_regression #
+
+                # Step 7: Add % above/below log reg trend to dividend csv output
+                # Ensure TL_Price exists
+                df['TL_Price'] = np.exp(df['priceTL'])
+
+                # Step 7.1: Ensure 'Date' is a **flat column**, not in index or multi-level column
+                if 'Date' not in div_df.columns:
+                    div_df = div_df.reset_index()
+                if 'Date' not in df.columns:
+                    df = df.reset_index()
+
+                # Step 7.2: Remove MultiIndex on columns (some operations create it)
+                div_df.columns = div_df.columns.get_level_values(0)
+                df.columns = df.columns.get_level_values(0)
+
+                # Step 7.3: Normalize 'Date' to same type (datetime.date)
+                div_df['Date'] = pd.to_datetime(div_df['Date']).dt.date
+                df['Date'] = pd.to_datetime(df['Date']).dt.date
+
+                # Step 7.4: Merge TL_Price from df (log regression) into div_df (dividend data)
+                div_df = pd.merge(div_df, df[['Date', 'TL_Price']], on='Date', how='left')
+
+                # Step 7.5: Calculate and format % Above/Below Trendline
+                div_df['% Above/Below Trendline'] = (
+                        (div_df['Share Price'] - div_df['TL_Price']) / div_df['TL_Price']
+                ).map(lambda x: f"{x:.2%}" if pd.notna(x) else '')
+
+            # Debugging for Step 7:
+            #    print("div_df.dtypes:\n", div_df.dtypes)
+            #    print("df.dtypes:\n", df.dtypes)
+            #    print("div_df.columns:\n", div_df.columns)
+            #    print("df.columns:\n", df.columns)
+
+        # ------------------------------------------------------------------------------- #
 
                 if save_csv or getattr(args, 'csv', False):
                     div_df.to_csv(f'{symbol}_dividends.csv', index=False)
                     print(f"✔️Saved dividend data to: {symbol}_dividends.csv")
+
+# -------------------------------------------------------------------------------------------------- #
 
                 # Chart plotting
                 plt.figure(dpi=600)
@@ -840,7 +930,7 @@ cd /path/to/your/project (only from terminal)
 git status               (venv start here)
 git add -A
 git status               (to check that correct changes are staged)
-git commit -m "Your commit message"
+git commit -m "commit message"
 git push origin main
 [----------------------------------]
 
@@ -1042,3 +1132,4 @@ python3 cli15.py --comparex nvda --vs amd msft adi --pe
 
 # ---------- Compare Section END ---------- #
 # ----------------------------------------- #
+
