@@ -23,19 +23,19 @@ REQUIRED libraries:
 pip install yfinance pandas numpy matplotlib argparse
 
 [----------------------------------]
-BASH Instructions:
+    BASH Instructions:
 From terminal --> Change directory
 cd ~/path/to/your/folder
 
 From directory --> Run python script
 python3 cli6.py SPY GOLD USD-BTC
 [----------------------------------]
-VENV Instructions:
+    VENV Instructions:
 From venv --> Run python script
 python3 cli6.py SPY GOLD USD-BTC
 [----------------------------------]
-GIT Push/Pull Instructions:
-cd /path/to/your/project (only from terminal)
+    GIT Push/Pull Instructions:
+cd /path/to/your/project (from terminal)
 git status               (venv start here)
 git add -A
 git commit -m "commit message"
@@ -126,4 +126,5 @@ python3 cli6.py
 v6. CURRENT CAPABILITY Examples:
 python3 cli6.py --log --normdist --intrv 1d --smooth 252 --start 1900-01-01 --end 2100-01-01 --pe --div --compare --csv
 python3 cli6.py --comparex nvda --vs amd msft adi --pe
+python3 cli16.1.py eix --log --div --csv
 -----------------------------------------------------------------------------------------------------------------------]
