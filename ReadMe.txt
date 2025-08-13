@@ -1,7 +1,7 @@
 
 Description:
-This is a command-line tool that facilitates the analysis of financial market data available via the yfinance python library.
-It requires yfinance, pandas, numpy, matplotlib for data manipulation/visualization and argparse to create a "syntax" for the commandline arguments.
+This is a command-line tool for retrieving and analyzing data available via the yfinance python library,
+The required libraries are yfinance, pandas, numpy, matplotlib (for data manipulation/visualization) and argparse to create the "syntax" for your commandline arguments.
 The intended use of this script is to act as a quantitative pre/post-requisite for making investment decisions.
 In other words, the qualitative fundamentals, financials and future prospects of said asset must be sound in order for this to be used as an "indicator of timing".
 

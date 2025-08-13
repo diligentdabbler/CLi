@@ -3,6 +3,232 @@
 import argparse
 import pandas as pd
 import yfinance as yf
+
+# ==== yfinance rate-limit and caching wrappers (inserted by assistant) ====
+# These wrappers aim to reduce burstiness and add gentle retries so terminal runs
+# behave like PyCharm runs without changing your call sites or logic.
+
+import time as _yl_time
+import random as _yl_rand
+import threading as _yl_threading
+import requests as _yl_requests
+
+try:
+    import yfinance as _yl_yf
+except Exception:
+    _yl_yf = None
+
+# Shared HTTP session
+_YL_SESSION = _yl_requests.Session()
+
+# Allow disabling wrappers via env var if needed
+import os as _yl_os
+if _yl_os.getenv("YF_WRAPPERS_DISABLED", "").lower() not in {"1", "true", "yes"} and _yl_yf is not None:
+    _yl_download_orig = _yl_yf.download
+
+    # Cache dicts to avoid duplicate refetches within a run
+    _yl_download_cache = {}
+    _yl_history_cache = {}
+
+    # Simple token bucket to keep ~1–1.5 RPS; adjust via env if desired
+    _yl_rate = float(_yl_os.getenv("YF_RPS", "0.5"))
+    _yl_burst = int(float(_yl_os.getenv("YF_BURST", "1")))
+    _yl_tokens = _yl_burst
+    _yl_last = _yl_time.monotonic()
+    _yl_lock = _yl_threading.Lock()
+    _yl_cooldown_until = 0.0
+    _yl_min_cooldown = float(_yl_os.getenv("YF_COOLDOWN", "60"))
+
+    def _yl_acquire():
+        # Basic token bucket with global cooldown on 429
+        global _yl_tokens, _yl_last
+        while True:
+            with _yl_lock:
+                now = _yl_time.monotonic()
+                # respect cooldown
+                if now < _yl_cooldown_until:
+                    sleep_for = _yl_cooldown_until - now
+                    _yl_time.sleep(sleep_for)
+                    continue
+                # refill
+                _yl_tokens = min(_yl_burst, _yl_tokens + (now - _yl_last) * _yl_rate)
+                _yl_last = now
+                if _yl_tokens >= 1.0:
+                    _yl_tokens -= 1.0
+                    return
+            _yl_time.sleep(0.02)
+
+    def _is_rate_limit_exception(e):
+        s = str(e).lower()
+        return ("429" in s or "rate" in s or "too many" in s or "temporarily unavailable" in s)
+
+    def _normalize_kwargs(kwargs):
+        # Convert dict to a tuple of sorted items; pandas objects excluded
+        key_items = []
+        for k, v in sorted(kwargs.items()):
+            # Avoid caching on objects that are clearly not hashable or huge
+            if hasattr(v, "to_pydatetime") or hasattr(v, "to_timestamp"):
+                v = str(v)
+            key_items.append((k, str(v)))
+        return tuple(key_items)
+
+    def _cache_key(prefix, *args, **kwargs):
+        return (prefix, tuple(args), _normalize_kwargs(kwargs))
+
+    def _retry_call(fn, *args, **kwargs):
+        delay = _yl_min_cooldown
+        max_retries = int(_yl_os.getenv("YF_MAX_RETRIES", "5"))
+        for attempt in range(max_retries):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                if _is_rate_limit_exception(e):
+                    _yl_time.sleep(delay + _yl_rand.random())
+                    delay = min(delay * 2.0, 32.0)
+                    continue
+                raise
+        # final try
+        return fn(*args, **kwargs)
+
+    def _wrapped_download(*args, **kwargs):
+        # Enforce gentler settings
+        kwargs.setdefault("threads", False)
+        kwargs.setdefault("progress", False)
+        # Build cache key (ignore session object)
+        key = _cache_key("download", *args, **{k:v for k,v in kwargs.items() if k != "session"})
+        if key in _yl_download_cache:
+            return _yl_download_cache[key]
+        _yl_acquire()
+        kwargs.setdefault("session", _YL_SESSION)
+        result = _retry_call(_yl_download_orig, *args, **kwargs)
+        _yl_download_cache[key] = result
+        return result
+
+    # Monkeypatch download
+    _yl_yf.download = _wrapped_download
+
+    # Monkeypatch Ticker.history to add retries + caching + pacing
+    try:
+        import yfinance.ticker as _yl_ticker_mod
+        _yl_history_orig = _yl_ticker_mod.Ticker.history
+
+        def _wrapped_history(self, *args, **kwargs):
+            # Cache by ticker symbol + args/kwargs that define the window
+            sym = getattr(self, "ticker", None)
+            # Exclude 'auto_adjust' and similar toggles from over-broad caching
+            cache_kwargs = {k: v for k, v in kwargs.items() if k not in ("auto_adjust", "actions")}
+            key = _cache_key(("history", sym), *args, **cache_kwargs)
+            if key in _yl_history_cache:
+                return _yl_history_cache[key]
+            _yl_acquire()
+            result = _retry_call(_yl_history_orig, self, *args, **kwargs)
+            _yl_history_cache[key] = result
+            return result
+
+        _yl_ticker_mod.Ticker.history = _wrapped_history
+    except Exception:
+        # If monkeypatch fails, just continue; core download wrapper still helps.
+        pass
+# ==== end wrappers ====
+
+# ==== centralized fetch & reuse helpers ====
+# Resolve original yfinance download function (pre-wrapped if available)
+try:
+    _YL_ORIG_DOWNLOAD = _yl_download_orig  # from the wrapper above, if present
+except NameError:
+    _YL_ORIG_DOWNLOAD = yf.download
+
+from datetime import datetime
+import pandas as _pf_pd
+
+_PRICE_CACHE = {}        # key: (symbol, interval) -> {"range": (start,end), "df": DataFrame}
+_DIVIDEND_CACHE = {}     # key: symbol -> Series
+
+def _to_ts(x):
+    if x is None:
+        return None
+    try:
+        return _pf_pd.Timestamp(x)
+    except Exception:
+        return _pf_pd.Timestamp(str(x))
+
+def _range_union(a, b):
+    s1, e1 = a
+    s2, e2 = b
+    s = min([t for t in (s1, s2) if t is not None]) if (s1 is not None or s2 is not None) else None
+    e = max([t for t in (e1, e2) if t is not None]) if (e1 is not None or e2 is not None) else None
+    return (s, e)
+
+def _slice_df(df, start=None, end=None):
+    if start is None and end is None:
+        return df
+    st = _to_ts(start) if start is not None else None
+    en = _to_ts(end) if end is not None else None
+    out = df
+    if st is not None:
+        out = out[out.index >= st]
+    if en is not None:
+        out = out[out.index <= en]
+    return out
+
+def get_price_history(symbol, start=None, end=None, interval="1d", **kwargs):
+    """Fetch price history once per symbol/interval; reuse and slice for subsequent calls."""
+    sym = str(symbol).replace(".", "-")
+    key = (sym, interval)
+    req = (_to_ts(start), _to_ts(end))
+    entry = _PRICE_CACHE.get(key)
+
+    need_fetch = True
+    if entry is not None:
+        have_start, have_end = entry["range"]
+        if (req[0] is None or (have_start is not None and have_start <= req[0])) and \
+           (req[1] is None or (have_end is not None and have_end >= req[1])):
+            need_fetch = False
+
+    if need_fetch:
+        fetch_range = req if entry is None else _range_union(entry["range"], req)
+        df_new = _YL_ORIG_DOWNLOAD(sym, start=fetch_range[0], end=fetch_range[1],
+                                   interval=interval, progress=False, threads=False, actions=True, session=_YL_SESSION, **kwargs)
+        if not isinstance(df_new, _pf_pd.DataFrame):
+            return df_new
+        if entry is None:
+            entry = {"range": fetch_range, "df": df_new}
+        else:
+            df_old = entry["df"]
+            df_merged = _pf_pd.concat([df_old, df_new]).sort_index()
+            df_merged = df_merged[~df_merged.index.duplicated(keep="last")]
+            entry = {"range": fetch_range, "df": df_merged}
+        _PRICE_CACHE[key] = entry
+
+    return _slice_df(entry["df"], start, end)
+
+def get_price_history_from_ticker(ticker_obj, start=None, end=None, interval="1d", **kwargs):
+    sym = getattr(ticker_obj, "ticker", None) or getattr(getattr(ticker_obj, "info", {}), "get", lambda *_: None)("symbol", None)
+    return get_price_history(sym, start=start, end=end, interval=interval, **kwargs)
+
+def get_dividends(symbol):
+    sym = str(symbol).replace(".", "-")
+    if sym in _DIVIDEND_CACHE:
+        return _DIVIDEND_CACHE[sym]
+    # Pull actions via price history to avoid .dividends property
+    try:
+        df_actions = get_price_history(sym, interval="1d", period="max", actions=True)
+        div = None
+        if isinstance(df_actions, _pf_pd.DataFrame) and not df_actions.empty and "Dividends" in df_actions.columns:
+            ser = df_actions["Dividends"]
+            div = ser[ser != 0.0]
+    except Exception:
+        div = None
+    _DIVIDEND_CACHE[sym] = div
+    return div
+
+def get_dividends_from_ticker(ticker_obj):
+    sym = getattr(ticker_obj, "ticker", None) or getattr(getattr(ticker_obj, "info", {}), "get", lambda *_: None)("symbol", None)
+    return get_dividends(sym)
+# ==== end helpers ====
+# ==== end helpers ====
+
+
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.dates import DateFormatter
@@ -282,7 +508,7 @@ def plot_chart(df, symbol, percent_gain=None, date_range=None, avg_div_yield=Non
 # -------------------------------------------- #
 def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=False, args=None):
     print(f"Fetching data for {symbol}...")
-    df = yf.download(symbol, start=start, end=end, interval=interval).reset_index()
+    df = get_price_history(symbol, start=start, end=end, interval=interval).reset_index()
 
     if df.empty or 'Close' not in df.columns:
         print(f"No valid data returned for '{symbol}'.")
@@ -332,14 +558,14 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
     avg_div = None
 
     ticker_obj = yf.Ticker(symbol)
-    hist = ticker_obj.history(start=start, end=end)
+    hist = get_price_history_from_ticker(ticker_obj, start=start, end=end)
 
     # ----- PE RATIO BLOCK ----- #
     avg_pe = None
 
     if getattr(args, 'pe', False):
         try:
-            hist = ticker_obj.history(start=start, end=end, interval=interval)
+            hist = get_price_history_from_ticker(ticker_obj, start=start, end=end, interval=interval)
             earnings_per_share = ticker_obj.info.get('trailingEps')
 
             if 'Close' in hist.columns and earnings_per_share and earnings_per_share > 0:
@@ -396,8 +622,8 @@ def run_log_regression(symbol, start, end, interval, rolling=None, save_csv=Fals
 
     if getattr(args, 'div', False):
         try:
-            dividends = ticker_obj.dividends
-            hist_prices = ticker_obj.history(start=start, end=end)['Close']
+            dividends = get_dividends_from_ticker(ticker_obj)
+            hist_prices = get_price_history_from_ticker(ticker_obj, start=start, end=end)['Close']
 
             if not dividends.empty and not hist_prices.empty:
                 if dividends.index.tz is None:
@@ -585,7 +811,7 @@ def create_histograms(symbol, df, start_dt, end_dt, args):
 
         # Dividends
         if getattr(args, 'div', False):
-            dividends = yf.Ticker(symbol).dividends
+            dividends = get_dividends(symbol)
             if not dividends.empty:
                 if dividends.index.tz is None:
                     dividends.index = dividends.index.tz_localize('UTC')
@@ -603,7 +829,7 @@ def create_histograms(symbol, df, start_dt, end_dt, args):
             ticker_obj = yf.Ticker(symbol)
             earnings = ticker_obj.info.get('trailingEps')
             if earnings and earnings > 0:
-                hist = ticker_obj.history(start=start_dt, end=end_dt, interval=args.inter)
+                hist = get_price_history_from_ticker(ticker_obj, start=start_dt, end=end_dt, interval=args.inter)
                 hist['PE'] = hist['Close'] / earnings
                 pe_series = hist['PE'].dropna()
                 if not pe_series.empty:
@@ -656,7 +882,7 @@ def comparex_pe_summary(base_ticker, vs_tickers, args):
         try:
             obj = yf.Ticker(t)
             eps = obj.info.get('trailingEps', None)
-            price = obj.history(period='1d')['Close'].iloc[-1]
+            price = get_price_history_from_ticker(obj, period='1d')['Close'].iloc[-1]
             if eps and eps > 0:
                 pe = price / eps
                 pe_data[t] = pe
@@ -759,8 +985,8 @@ def comparex_div_summary(base_ticker, vs_tickers, args):
     for t in tickers:
         try:
             ticker_obj = yf.Ticker(t)
-            dividends = ticker_obj.dividends
-            hist_prices = ticker_obj.history(start=args.start, end=args.end)['Close']
+            dividends = get_dividends_from_ticker(ticker_obj)
+            hist_prices = get_price_history_from_ticker(ticker_obj, start=args.start, end=args.end)['Close']
 
             if not dividends.empty and not hist_prices.empty:
                 if dividends.index.tz is None:
@@ -1135,5 +1361,3 @@ python3 cli15.py --comparex nvda --vs amd msft adi --pe
 
 # ---------- Compare Section END ---------- #
 # ----------------------------------------- #
-
-
